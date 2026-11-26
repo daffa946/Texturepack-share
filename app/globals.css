@@ -37,3 +37,9 @@ input,textarea,select{font:inherit;padding:10px;border:3px solid var(--dirt);bac
 .bar2 i{display:block;height:100%;background:var(--grass)}
 .foot{text-align:center;padding:24px;color:#6b5b4e;font-size:.85rem}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.preview{display:flex;align-items:center;gap:14px}
+.plist{list-style:none;padding:0;margin:0;max-width:560px;display:grid;gap:8px}
+.plist li{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#fff;border:3px solid var(--dirt)}
+main{padding-top:20px}
+h1,h2,p,label,.meta,.sub{color:var(--ink)}
+.errbox{padding:14px;border:3px solid #a8321e;background:#fde8e4;color:#5a1a0e;font-weight:600}

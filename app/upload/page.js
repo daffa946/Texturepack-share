@@ -1,92 +1,124 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { upload } from '@vercel/blob/client';
+import { readPack } from '../lib/readPack';
 
 const safe = (n) => n.replace(/[^\w.\-]+/g, '_');
+const toDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
 
-export default function AddPack() {
+export default function Admin() {
+  const [password, setPassword] = useState('');
+  const [packFile, setPackFile] = useState(null);
+  const [meta, setMeta] = useState(null);
+  const [icon, setIcon] = useState(null); // data URL
   const [source, setSource] = useState('drive');
-  const [status, setStatus] = useState(null);
-  const [progress, setProgress] = useState(0);
+  const [driveLink, setDriveLink] = useState('');
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState(null);
+  const [packs, setPacks] = useState([]);
 
-  async function onSubmit(e) {
+  const loadPacks = () => fetch('/api/packs').then((r) => r.json()).then(setPacks).catch(() => {});
+  useEffect(() => { loadPacks(); }, []);
+  const edit = (k) => (e) => setMeta({ ...meta, [k]: e.target.value });
+
+  async function onPick(e) {
+    const file = e.target.files[0];
+    setStatus(null); setMeta(null); setIcon(null); setPackFile(file || null);
+    if (!file) return;
+    try {
+      const { meta, iconFile } = await readPack(file);
+      setMeta(meta);
+      if (iconFile) {
+        if (iconFile.size > 140000) setStatus({ ok: false, text: 'The icon is bigger than 140 KB, so it will be skipped.' });
+        else setIcon(await toDataUrl(iconFile));
+      }
+    } catch (err) { setStatus({ ok: false, text: err.message }); }
+  }
+
+  async function publish(e) {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const password = f.get('password');
-    const icon = f.get('icon');
-    const file = f.get('file');
+    const form = e.currentTarget;
     setBusy(true); setStatus(null); setProgress(0);
     try {
-      if (!icon?.size) throw new Error('Choose an icon image');
-      const iconBlob = await upload(`icons/${Date.now()}-${safe(icon.name)}`, icon, {
-        access: 'public', handleUploadUrl: '/api/upload', clientPayload: password,
-      });
-      let fileUrl = null;
+      let fileUrl = null, fileBlobUrl = null;
       if (source === 'upload') {
-        if (!file?.size) throw new Error('Choose a .zip file');
-        const fb = await upload(`files/${Date.now()}-${safe(file.name)}`, file, {
+        const fb = await upload(`files/${safe(packFile.name)}`, packFile, {
           access: 'public', handleUploadUrl: '/api/upload', clientPayload: password,
-          onUploadProgress: (p) => setProgress(p.percentage),
+          contentType: 'application/octet-stream', onUploadProgress: (p) => setProgress(p.percentage),
         });
-        fileUrl = fb.url;
+        fileUrl = fb.downloadUrl || fb.url; fileBlobUrl = fb.url;
       }
       const res = await fetch('/api/packs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password, source, fileUrl, iconUrl: iconBlob.url,
-          driveLink: f.get('driveLink'), name: f.get('name'), author: f.get('author'),
-          version: f.get('version'), resolution: f.get('resolution'), description: f.get('description'),
-        }),
+        body: JSON.stringify({ ...meta, password, source, driveLink, fileUrl, fileBlobUrl, iconDataUrl: icon }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setStatus({ ok: true, text: 'Pack published. It is now on the home page.' });
-      e.currentTarget.reset();
-    } catch (err) {
-      setStatus({ ok: false, text: err.message });
-    } finally { setBusy(false); }
+      setStatus({ ok: true, text: `Published “${meta.name}”.` });
+      setPackFile(null); setMeta(null); setIcon(null); setDriveLink(''); form.reset(); loadPacks();
+    } catch (err) { setStatus({ ok: false, text: err.message }); }
+    finally { setBusy(false); }
+  }
+
+  async function remove(p) {
+    if (!password) return setStatus({ ok: false, text: 'Type the admin password first.' });
+    if (!confirm(`Delete “${p.name}”?`)) return;
+    const res = await fetch('/api/packs', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, password }),
+    });
+    if (res.ok) loadPacks(); else setStatus({ ok: false, text: (await res.json()).error });
   }
 
   return (
     <>
-      <h1>Add a pack</h1>
-      <p className="sub">Only people with the admin password can publish.</p>
-      <form onSubmit={onSubmit}>
-        <label>Admin password<input name="password" type="password" required /></label>
-        <label>Pack name<input name="name" required maxLength={60} /></label>
-        <label>Icon <small>Square PNG, 128×128 works best (the pack.png from your pack)</small>
-          <input name="icon" type="file" accept="image/png,image/jpeg,image/webp" required />
-        </label>
-
-        <div className="tabs" role="group" aria-label="Where is the file?">
-          <button type="button" aria-pressed={source === 'drive'} onClick={() => setSource('drive')}>Google Drive link</button>
-          <button type="button" aria-pressed={source === 'upload'} onClick={() => setSource('upload')}>Upload here</button>
-        </div>
-        {source === 'drive' ? (
-          <label>Drive share link <small>Set sharing to “Anyone with the link” first</small>
-            <input name="driveLink" type="url" placeholder="https://drive.google.com/file/d/…/view" required />
-          </label>
-        ) : (
-          <label>Texture pack .zip <small>Up to 500 MB</small>
-            <input name="file" type="file" accept=".zip,application/zip" required />
-          </label>
+      <h1>Publish a pack</h1>
+      <p className="sub">Choose a .mcpack and the icon, name and author are read from inside it.</p>
+      <form onSubmit={publish}>
+        <label>Admin password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+        <label>Pack file (.mcpack or .zip)<input type="file" accept=".mcpack,.zip" onChange={onPick} required /></label>
+        {meta && (
+          <>
+            <div className="preview">
+              {icon
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img className="icon" src={icon} alt="Icon found in the pack" />
+                : <div className="icon" aria-hidden="true" />}
+              <small>{icon ? 'Icon taken from pack_icon.png' : 'No icon found in this pack.'}</small>
+            </div>
+            <label>Name<input value={meta.name} onChange={edit('name')} required /></label>
+            <label>Author <small>From manifest.json. Fix it if empty.</small><input value={meta.author} onChange={edit('author')} /></label>
+            <label>Version<input value={meta.version} onChange={edit('version')} /></label>
+            <label>Description<textarea rows={3} maxLength={300} value={meta.description} onChange={edit('description')} /></label>
+            <div className="tabs" role="group" aria-label="Where is the file hosted?">
+              <button type="button" aria-pressed={source === 'drive'} onClick={() => setSource('drive')}>Google Drive link</button>
+              <button type="button" aria-pressed={source === 'upload'} onClick={() => setSource('upload')}>Auto upload</button>
+            </div>
+            {source === 'drive' ? (
+              <label>Drive share link <small>Share the same file as “Anyone with the link”.</small>
+                <input type="url" value={driveLink} onChange={(e) => setDriveLink(e.target.value)} placeholder="https://drive.google.com/file/d/…/view" required />
+              </label>
+            ) : (
+              <>
+                <small>The file you picked is uploaded automatically when you press Publish (needs the Blob store).</small>
+                {busy && <div className="bar2"><i style={{ width: `${progress}%` }} /></div>}
+              </>
+            )}
+          </>
         )}
-
-        <label>Author<input name="author" maxLength={40} /></label>
-        <label>Minecraft version<input name="version" placeholder="1.21" maxLength={20} /></label>
-        <label>Resolution
-          <select name="resolution" defaultValue="">
-            <option value="">Not set</option>
-            {['16x', '32x', '64x', '128x', '256x', '512x+'].map((r) => <option key={r}>{r}</option>)}
-          </select>
-        </label>
-        <label>Description<textarea name="description" rows={3} maxLength={300} /></label>
-
-        {busy && source === 'upload' && <div className="bar2"><i style={{ width: `${progress}%` }} /></div>}
         {status && <div className={`msg ${status.ok ? 'ok' : 'err'}`} role="status">{status.text}</div>}
-        <button className="btn" disabled={busy}>{busy ? 'Publishing…' : 'Publish pack'}</button>
+        <button className="btn" disabled={busy || !meta}>{busy ? 'Publishing…' : 'Publish pack'}</button>
       </form>
+
+      <h1 style={{ marginTop: 48, fontSize: '1.4rem' }}>Published packs</h1>
+      {packs.length === 0 ? <p className="sub">Nothing yet.</p> : (
+        <ul className="plist">
+          {packs.map((p) => (
+            <li key={p.id}><span>{p.name}{p.author ? ` · ${p.author}` : ''}</span>
+              <button type="button" className="btn ghost" onClick={() => remove(p)}>Delete</button></li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }
