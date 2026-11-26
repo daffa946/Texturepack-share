@@ -14,6 +14,11 @@ function stripComments(s) {
   return o.replace(/,\s*([}\]])/g, '$1');
 }
 
+// Many packs put the author in the description, e.g. "edited by mop/krystal".
+const guessAuthor = (d) => {
+  const m = [...String(d || '').matchAll(/\b(?:made by|edited by|created by|credits?:?|by)\s+([^.\n,;]+)/gi)].pop();
+  return m ? m[1].trim() : '';
+};
 const clean = (s) => String(s || '').replace(/§./g, '').trim();
 
 // Reads a .mcpack (a zip): manifest.json for name/author/version, pack_icon.png for the icon.
@@ -52,7 +57,7 @@ export async function readPack(file) {
     iconFile,
     meta: {
       name: clean(tr(h.name)) || file.name.replace(/\.\w+$/, ''),
-      author: Array.isArray(authors) ? authors.join(', ') : clean(authors),
+      author: Array.isArray(authors) ? authors.join(', ') : clean(authors) || guessAuthor(clean(tr(h.description))),
       version: Array.isArray(h.version) ? h.version.join('.') : '',
       description: clean(tr(h.description)),
       minEngine: Array.isArray(h.min_engine_version) ? h.min_engine_version.join('.') : '',

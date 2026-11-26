@@ -4,7 +4,17 @@ import { upload } from '@vercel/blob/client';
 import { readPack } from '../lib/readPack';
 
 const safe = (n) => n.replace(/[^\w.\-]+/g, '_');
-const toDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+// Shrinks any icon (even a 400 KB one) to a 128x128 square so it stays tiny.
+async function shrinkIcon(blob) {
+  const bmp = await createImageBitmap(blob);
+  const side = Math.min(bmp.width, bmp.height), S = 128;
+  const c = document.createElement('canvas'); c.width = S; c.height = S;
+  const x = c.getContext('2d'); x.imageSmoothingQuality = 'high';
+  x.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, S, S);
+  let url = c.toDataURL('image/png');
+  if (url.length > 150000) url = c.toDataURL('image/jpeg', 0.85);
+  return url;
+}
 
 export default function Admin() {
   const [password, setPassword] = useState('');
@@ -29,10 +39,7 @@ export default function Admin() {
     try {
       const { meta, iconFile } = await readPack(file);
       setMeta(meta);
-      if (iconFile) {
-        if (iconFile.size > 140000) setStatus({ ok: false, text: 'The icon is bigger than 140 KB, so it will be skipped.' });
-        else setIcon(await toDataUrl(iconFile));
-      }
+      if (iconFile) setIcon(await shrinkIcon(iconFile));
     } catch (err) { setStatus({ ok: false, text: err.message }); }
   }
 
